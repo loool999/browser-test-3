@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Headless Browser</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="browser-container">
+        <!-- Browser Toolbar -->
+        <div class="browser-toolbar">
+            <div class="navigation-buttons">
+                <button id="backButton" class="nav-button" title="Go Back">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <button id="forwardButton" class="nav-button" title="Go Forward">
+                    <i class="fas fa-arrow-right"></i>
+                </button>
+                <button id="refreshButton" class="nav-button" title="Refresh">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+                <button id="homeButton" class="nav-button" title="Home">
+                    <i class="fas fa-home"></i>
+                </button>
+            </div>
+            
+            <div class="address-bar">
+                <div class="security-indicator" id="securityIndicator">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <input type="text" id="urlInput" placeholder="Enter URL...">
+                <button id="goButton">Go</button>
+            </div>
+            
+            <div class="toolbar-actions">
+                <button id="bookmarkButton" class="action-button" title="Bookmark">
+                    <i class="far fa-bookmark"></i>
+                </button>
+                <button id="bookmarksListButton" class="action-button" title="Bookmarks">
+                    <i class="fas fa-bookmark"></i>
+                </button>
+                <button id="settingsButton" class="action-button" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <button id="fullscreenButton" class="action-button" title="Fullscreen">
+                    <i class="fas fa-expand"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Page Info Bar -->
+        <div class="page-info-bar">
+            <div class="page-title">
+                <img id="pageFavicon" class="page-favicon" src="" alt="">
+                <span id="pageTitle"></span>
+            </div>
+            <div class="connection-info">
+                <span id="connectionStatus" class="connection-status">Disconnected</span>
+                <span id="fpsCounter" class="fps-counter">0 FPS</span>
+            </div>
+        </div>
+        
+        <!-- Browser Viewport -->
+        <div class="browser-viewport">
+            <img id="browserScreen" src="" alt="Browser Screen">
+            
+            <!-- Element Highlight Overlay -->
+            <div id="elementHighlight" class="element-highlight"></div>
+            
+            <!-- Loading Overlay -->
+            <div id="loadingOverlay" class="loading-overlay">
+                <div class="spinner"></div>
+                <div class="loading-text">Connecting...</div>
+            </div>
+            
+            <!-- Error Overlay -->
+            <div id="errorOverlay" class="error-overlay hidden">
+                <div class="error-message">
+                    <h3>Error</h3>
+                    <p id="errorMessage"></p>
+                    <button id="errorDismiss" class="button primary">Dismiss</button>
+                </div>
+            </div>
+            
+            <!-- Form Data Overlay -->
+            <div id="formDataPrompt" class="form-data-overlay hidden">
+                <div class="form-data-dialog">
+                    <h3>Form Data Detected</h3>
+                    <p>Would you like to save this information for future use?</p>
+                    <div id="formDataFields" class="form-data-fields"></div>
+                    <div class="form-data-actions">
+                        <button id="saveFormData" class="button primary">Save</button>
+                        <button id="cancelFormData" class="button secondary">Cancel</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Page Loading Indicator -->
+            <div id="pageLoadingIndicator" class="page-loading-indicator hidden">
+                <div class="loading-bar"></div>
+            </div>
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div id="elementInfo" class="element-info">
+                <span id="elementType"></span>
+                <span id="elementText"></span>
+            </div>
+            <div class="browser-controls">
+                <div class="zoom-controls">
+                    <button id="zoomOutButton" class="zoom-button" title="Zoom Out">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <span id="zoomLevel">100%</span>
+                    <button id="zoomInButton" class="zoom-button" title="Zoom In">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                </div>
+                <div class="performance-controls">
+                    <label for="fpsSlider">FPS:</label>
+                    <input type="range" id="fpsSlider" min="1" max="30" value="10" class="fps-slider">
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bookmarks Panel -->
+    <div id="bookmarksPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>Bookmarks</h3>
+            <button id="closeBookmarksButton" class="close-button">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="panel-content">
+            <div class="panel-search">
+                <input type="text" id="bookmarkSearch" placeholder="Search bookmarks...">
+            </div>
+            <div id="bookmarksList" class="bookmarks-list">
+                <!-- Bookmarks will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- History Panel -->
+    <div id="historyPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>History</h3>
+            <button id="closeHistoryButton" class="close-button">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="panel-content">
+            <div class="panel-search">
+                <input type="text" id="historySearch" placeholder="Search history...">
+                <button id="clearHistoryButton" class="panel-action-button" title="Clear History">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+            <div id="historyList" class="history-list">
+                <!-- History will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Panel -->
+    <div id="settingsPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>Settings</h3>
+            <button id="closeSettingsButton" class="close-button">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="panel-content">
+            <div class="settings-section">
+                <h4>Performance</h4>
+                <div class="setting-item">
+                    <label for="qualitySelector">Screenshot Quality:</label>
+                    <select id="qualitySelector" class="settings-select">
+                        <option value="low">Low (Faster)</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High (Slower)</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label for="fpsLimitSelector">FPS Limit:</label>
+                    <select id="fpsLimitSelector" class="settings-select">
+                        <option value="5">5 FPS</option>
+                        <option value="10" selected>10 FPS</option>
+                        <option value="15">15 FPS</option>
+                        <option value="30">30 FPS</option>
+                    </select>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4>Interface</h4>
+                <div class="setting-item">
+                    <label for="themeSelector">Theme:</label>
+                    <select id="themeSelector" class="settings-select">
+                        <option value="light" selected>Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="system">System</option>
+                    </select>
+                </div>
+                <div class="setting-item checkbox-item">
+                    <input type="checkbox" id="showElementHighlight" checked>
+                    <label for="showElementHighlight">Highlight elements on hover</label>
+                </div>
+                <div class="setting-item checkbox-item">
+                    <input type="checkbox" id="autoFillForms" checked>
+                    <label for="autoFillForms">Auto-fill forms when possible</label>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4>Privacy & Security</h4>
+                <div class="setting-item">
+                    <button id="clearCookiesButton" class="settings-button">Clear Cookies</button>
+                </div>
+                <div class="setting-item">
+                    <button id="clearFormDataButton" class="settings-button">Clear Saved Form Data</button>
+                </div>
+                <div class="setting-item">
+                    <button id="clearHistorySettingsButton" class="settings-button">Clear Browsing History</button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4>Advanced</h4>
+                <div class="setting-item checkbox-item">
+                    <input type="checkbox" id="enableDebugMode">
+                    <label for="enableDebugMode">Enable debug mode</label>
+                </div>
+                <div class="setting-item">
+                    <button id="viewSourceButton" class="settings-button">View Page Source</button>
+                </div>
+                <div class="setting-item">
+                    <button id="showHistoryButton" class="settings-button">Show Navigation History</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Debug Panel -->
+    <div id="debugPanel" class="debug-panel hidden">
+        <div class="debug-header">
+            <h3>Debug</h3>
+            <button id="closeDebugButton" class="close-button">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="debug-content">
+            <div class="debug-section">
+                <h4>WebSocket Status</h4>
+                <pre id="wsStatus">Disconnected</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Last Message</h4>
+                <pre id="lastMessage">None</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Element Inspector</h4>
+                <pre id="elementDebugInfo">Click an element to inspect</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Console</h4>
+                <div id="debugConsole" class="debug-console"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page Source View -->
+    <div id="sourcePanel" class="source-panel hidden">
+        <div class="panel-header">
+            <h3>Page Source</h3>
+            <button id="closeSourceButton" class="close-button">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="panel-content">
+            <pre id="pageSourceCode" class="page-source-code"></pre>
+        </div>
+    </div>
+    
+    <script src="/static/js/browser.js"></script>
+</body>
+</html>
