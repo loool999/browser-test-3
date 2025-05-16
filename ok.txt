@@ -1,0 +1,266 @@
+# newtest.py (or app.py)
+
+from flask import Flask, render_template, request, jsonify, send_file, Response
+from browser_controller import BrowserController
+import io
+import time
+import threading
+import os
+import uuid
+
+# --- Global Variables & Configuration ---
+browser_controller = None
+app_ready = False 
+command_queue = []
+command_event = threading.Event() 
+latest_frame_bytes = None
+latest_frame_lock = threading.Lock() 
+request_new_frame_event = threading.Event()
+
+# --- Flask Application Setup ---
+app = Flask(__name__)
+app.secret_key = os.urandom(24) 
+
+# --- Command Parsing Utility ---
+def parse_simple_command(command_str: str):
+    # ... (Same as before, ensure it's correct)
+    if not command_str or not command_str.strip():
+        return {"action": "error", "message": "Command cannot be empty."}
+    parts = command_str.strip().split(" ", 2) 
+    action_type = parts[0].lower()
+    action_item = {"action": action_type}
+    if not parts: return {"action": "error", "message": "Command parsing failed (empty parts)."}
+    if action_type == "navigate":
+        if len(parts) > 1: action_item["url"] = parts[1]
+        else: return {"action": "error", "message": "Navigate command needs a URL. Usage: navigate <url>"}
+    elif action_type == "type":
+        if len(parts) > 2:
+            action_item["selector"] = parts[1]
+            action_item["text_to_type"] = parts[2]
+        else: return {"action": "error", "message": "Type command needs a selector and text. Usage: type <selector> <text_to_type>"}
+    elif action_type == "click":
+        if len(parts) > 1: action_item["selector"] = parts[1]
+        else: return {"action": "error", "message": "Click command needs a selector. Usage: click <selector>"}
+    elif action_type == "press_key":
+        if len(parts) > 1: action_item["key"] = parts[1]
+        else: return {"action": "error", "message": "Press_key command needs a key. Usage: press_key <key_name>"}
+    else: return {"action": "error", "message": f"Unknown command action: '{action_type}'. Supported: navigate, type, click, press_key"}
+    return action_item
+
+# --- Browser Worker Thread ---
+def browser_thread_worker():
+    global browser_controller, app_ready, latest_frame_bytes, latest_frame_lock, request_new_frame_event
+    print("DEBUG: Worker thread started.") # DEBUG
+    try:
+        browser_controller = BrowserController(headless=True) 
+        app_ready = True
+        print("DEBUG: Worker: Browser and Playwright initialized.") # DEBUG
+    except Exception as e:
+        print(f"FATAL ERROR: Could not initialize BrowserController in worker thread: {e}")
+        app_ready = False
+        return
+
+    # Initial placeholder frame
+    try:
+        from PIL import Image, ImageDraw
+        img = Image.new('RGB', (800, 600), color='darkgrey')
+        d = ImageDraw.Draw(img); d.text((30, 30), "Initializing Stream...", fill=(255, 255, 0))
+        byte_arr = io.BytesIO(); img.save(byte_arr, format='JPEG')
+        with latest_frame_lock: latest_frame_bytes = byte_arr.getvalue()
+    except Exception: pass # Ignore if PIL fails for placeholder
+
+    last_frame_capture_time = 0
+    worker_frame_capture_interval = 0.2 
+
+    while True:
+        if request_new_frame_event.is_set():
+            request_new_frame_event.clear() 
+            command_event.set()             
+            # print("DEBUG: Worker: request_new_frame_event was set, signaling command_event for frame.") # DEBUG
+
+        # print(f"DEBUG: Worker: About to wait on command_event. Queue size: {len(command_queue)}") # DEBUG
+        signaled_by_event = command_event.wait(timeout=worker_frame_capture_interval)
+        # print(f"DEBUG: Worker: Woke up from wait. Signaled: {signaled_by_event}. Queue size: {len(command_queue)}") # DEBUG
+
+
+        if signaled_by_event:
+            command_event.clear() 
+            # print("DEBUG: Worker: Cleared command_event because it was signaled.") # DEBUG
+
+        if command_queue:
+            task = command_queue.pop(0) 
+            print(f"DEBUG: Worker: Dequeued task. Type: {task.get('type', 'N/A')}, Command: '{task.get('command_string', 'N/A')}'") # DEBUG
+            current_logs = []
+            raw_command_str = task.get('command_string', '')
+            if 'result_data' not in task: task['result_data'] = None 
+
+            try:
+                if not browser_controller or not browser_controller.page:
+                    raise RuntimeError("Browser page is not available or controller not initialized.")
+                action_item = parse_simple_command(raw_command_str) 
+                current_logs.append(f"Processing raw command: '{raw_command_str}'")
+                if not action_item or action_item.get("action") == "error":
+                    error_message = action_item.get("message") if action_item else "Invalid command format."
+                    current_logs.append(f"COMMAND PARSE ERROR: {error_message}")
+                    task['result_data'] = {"status": "error", "message": error_message, "logs": current_logs}
+                else:
+                    action_type_parsed = action_item.get("action")
+                    current_logs.append(f"Parsed action: {action_type_parsed}, Params: {action_item}")
+                    print(f"DEBUG: Worker: Executing action '{action_type_parsed}' with params {action_item}") # DEBUG
+                    # --- ACTION EXECUTION ---
+                    if action_type_parsed == "navigate": browser_controller.navigate(action_item.get("url"))
+                    elif action_type_parsed == "type": browser_controller.type_text(action_item.get("selector"), action_item.get("text_to_type"))
+                    elif action_type_parsed == "click": browser_controller.click_element(action_item.get("selector"))
+                    elif action_type_parsed == "press_key": browser_controller.press_key(action_item.get("key"))
+                    # --- END ACTION EXECUTION ---
+                    time.sleep(0.3) 
+                    if browser_controller.page: 
+                       browser_controller.page.wait_for_load_state("domcontentloaded", timeout=7000) 
+                    current_logs.append(f"Action '{action_type_parsed}' executed.")
+                    task['result_data'] = {"status": "success", "message": f"Action '{action_type_parsed}' processed.", "logs": current_logs}
+                    print(f"DEBUG: Worker: Action '{action_type_parsed}' success. Signaling for frame update.") # DEBUG
+                    command_event.set() 
+            except Exception as e:
+                error_msg = f"WORKER THREAD USER COMMAND ERROR: {str(e)}"
+                print(f"DEBUG: Worker: {error_msg} (Command: {raw_command_str})") # DEBUG
+                current_logs.append(error_msg)
+                if 'result_data' in task: 
+                    task['result_data'] = {"status": "error", "message": error_msg, "logs": current_logs}
+        # else: # Only print if no command was processed and it wasn't a frame signal
+            # if not signaled_by_event:
+                # print(f"DEBUG: Worker: No command in queue and wait timed out. Queue size: {len(command_queue)}") # DEBUG
+
+
+        current_time = time.time()
+        should_capture_frame = signaled_by_event or (current_time - last_frame_capture_time > worker_frame_capture_interval)
+
+        if should_capture_frame:
+            if app_ready and browser_controller and browser_controller.page:
+                try:
+                    # print(f"DEBUG: Worker: Capturing frame. Signaled: {signaled_by_event}") # DEBUG
+                    frame = browser_controller.take_screenshot_bytes()
+                    if frame: 
+                        with latest_frame_lock: latest_frame_bytes = frame
+                        last_frame_capture_time = current_time
+                    # else: print("DEBUG: Worker: take_screenshot_bytes returned empty/None.") # DEBUG
+                except Exception as e_frame:
+                    print(f"WORKER THREAD: Error taking screenshot for MJPEG: {e_frame}")
+            # ... (placeholder frame logic)
+# --- End of browser_thread_worker ---
+
+# --- MJPEG Frame Generator ---
+def gen_frames():
+    global latest_frame_bytes, latest_frame_lock, request_new_frame_event, app_ready
+    try: client_addr = request.remote_addr 
+    except RuntimeError: client_addr = "unknown_client"
+    # print(f"DEBUG: MJPEG stream requested by a client: {client_addr}") # DEBUG (can be noisy)
+    try:
+        while True:
+            if not app_ready: # ... (error frame logic) ...
+                time.sleep(1); continue
+            request_new_frame_event.set()
+            frame_to_send = None
+            timeout_get_frame = 0.15 
+            start_get_frame = time.time()
+            while time.time() - start_get_frame < timeout_get_frame:
+                with latest_frame_lock:
+                    if latest_frame_bytes: frame_to_send = latest_frame_bytes; break 
+                time.sleep(0.01) 
+            if not frame_to_send: # ... (fallback frame logic) ...
+                with latest_frame_lock: frame_to_send = latest_frame_bytes
+                if not frame_to_send: time.sleep(0.1); continue 
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_to_send + b'\r\n')
+            time.sleep(0.05) 
+    except GeneratorExit: pass # print(f"DEBUG: MJPEG stream for client {client_addr} ended (client disconnected).") # DEBUG
+    except Exception as e_gen: print(f"Error in gen_frames for client {client_addr}: {e_gen}")
+# --- End of gen_frames ---
+
+# --- Flask Routes ---
+@app.route('/')
+def index(): return render_template('index.html')
+
+@app.route('/video_feed')
+def video_feed():
+    if not app_ready: return "Browser services not ready for video feed.", 503
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/current_url')
+def current_url_route():
+    # ... (Same as before)
+    if not app_ready or not browser_controller: return jsonify({"url": "Browser not ready..."})
+    current_page_url = "N/A"
+    try:
+        if browser_controller.page: current_page_url = browser_controller.get_current_url()
+    except Exception as e: print(f"Error in current_url_route: {e}"); current_page_url = "Error"
+    return jsonify({"url": current_page_url})
+
+
+@app.route('/command', methods=['POST'])
+def command_route():
+    print(f"DEBUG: Flask: Received POST to /command") # DEBUG
+    if not app_ready:
+        print("DEBUG: Flask: /command call but app not ready.") # DEBUG
+        return jsonify({"status": "error", "message": "Backend browser services not ready."}), 503
+
+    data = request.get_json()
+    print(f"DEBUG: Flask: /command payload: {data}") # DEBUG
+    if not data or 'command_string' not in data:
+        return jsonify({"status": "error", "message": "Invalid request: 'command_string' not found."}), 400
+
+    raw_command_str = data.get('command_string')
+    if not raw_command_str or not raw_command_str.strip():
+         return jsonify({"status": "error", "message": "Command string cannot be empty."}), 400
+
+    task_info = {'type': 'user_command', 'command_string': raw_command_str, 'result_data': None}
+
+    command_queue.append(task_info) 
+    print(f"DEBUG: Flask: Queued command: '{raw_command_str}'. Queue size: {len(command_queue)}") # DEBUG
+    command_event.set()             
+    print(f"DEBUG: Flask: Set command_event for '{raw_command_str}'") # DEBUG
+
+
+    processing_timeout_seconds = 60  
+    start_time = time.time()
+    while task_info['result_data'] is None and (time.time() - start_time) < processing_timeout_seconds:
+        time.sleep(0.1) 
+
+    if task_info['result_data']:
+        print(f"DEBUG: Flask: Returning result for '{raw_command_str}': {task_info['result_data']['status']}") # DEBUG
+        return jsonify(task_info['result_data'])
+    else:
+        print(f"DEBUG: Flask: Command '{raw_command_str}' timed out waiting for worker response.") # DEBUG
+        try: 
+            if task_info in command_queue: command_queue.remove(task_info)
+        except ValueError: pass 
+        return jsonify({
+            "status": "error", "message": "Command processing timed out on the server.",
+            "logs": [f"Server timeout for command: '{raw_command_str}'"]
+        }), 504
+# --- End of Flask Routes ---
+
+# --- Main Execution ---
+if __name__ == '__main__':
+    print("Starting application...")
+    print("Initializing browser worker thread...")
+    worker_thread = threading.Thread(target=browser_thread_worker, daemon=True)
+    worker_thread.start()
+
+    print("Waiting for browser initialization...")
+    initialization_timeout = 45  
+    wait_start_time = time.time()
+    while not app_ready and (time.time() - wait_start_time) < initialization_timeout:
+        time.sleep(0.5); print(".", end="", flush=True) 
+    print("") 
+
+    if not app_ready:
+        print("FATAL ERROR: Browser worker thread did not initialize. Exiting.")
+        exit(1) 
+
+    print("Browser initialization complete. Flask application is ready.")
+    print("Access at http://0.0.0.0:3000")
+    app.run(host='0.0.0.0', port=3000, debug=False, use_reloader=False)
+
+    print("Application shutting down...")
+    if browser_controller:
+        try: browser_controller.close(); print("Browser controller closed.")
+        except Exception as e: print(f"Error during browser cleanup: {e}")

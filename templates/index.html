@@ -3,286 +3,261 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Headless Browser</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <title>Manual Browser Control (MJPEG Stream)</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; background-color: #f0f0f0; }
+        .controls { padding: 10px; background-color: #333; color: white; display: flex; align-items: center; flex-wrap: wrap; /* Allow wrapping for smaller screens */ }
+        .controls input[type="text"] { flex-grow: 1; padding: 8px; margin-right: 10px; border-radius: 4px; border: 1px solid #555; background-color: #444; color: white; min-width: 200px; /* Ensure it doesn't get too small */}
+        .controls button { padding: 8px 15px; border-radius: 4px; border: none; background-color: #007bff; color: white; cursor: pointer; margin-top: 5px; margin-bottom: 5px; /* Spacing for wrapped items */ }
+        .controls button:hover { background-color: #0056b3; }
+        .browser-view-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 10px; overflow: auto; background-color: #ddd;}
+        #browserView { max-width: 100%; max-height: 100%; border: 1px solid #ccc; object-fit: contain; background-color: white; cursor: crosshair; /* Cursor for click interaction */ }
+        .status-log { padding: 10px; background-color: #222; color: #ccc; font-size: 0.9em; height: 150px; overflow-y: auto; border-top: 1px solid #444;}
+        .status-log p { margin: 2px 0; }
+        .status-log .user { color: #87ceeb; }
+        .status-log .system { color: #90ee90; }
+        .status-log .browser { color: #f0e68c; }
+        .status-log .error { color: #ff6347; font-weight: bold; }
+        #currentUrl { font-size: 0.8em; margin-left: 20px; color: #aaa; white-space: nowrap; }
+        .command-help { font-size: 0.8em; margin-left: 10px; color: #bbb; width: 100%; margin-top: 5px; } /* Full width for help */
+    </style>
 </head>
 <body>
-    <div class="browser-container">
-        <!-- Browser Toolbar -->
-        <div class="browser-toolbar">
-            <div class="navigation-buttons">
-                <button id="backButton" class="nav-button" title="Go Back">
-                    <i class="fas fa-arrow-left"></i>
-                </button>
-                <button id="forwardButton" class="nav-button" title="Go Forward">
-                    <i class="fas fa-arrow-right"></i>
-                </button>
-                <button id="refreshButton" class="nav-button" title="Refresh">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
-                <button id="homeButton" class="nav-button" title="Home">
-                    <i class="fas fa-home"></i>
-                </button>
-            </div>
-            
-            <div class="address-bar">
-                <div class="security-indicator" id="securityIndicator">
-                    <i class="fas fa-lock"></i>
-                </div>
-                <input type="text" id="urlInput" placeholder="Enter URL...">
-                <button id="goButton">Go</button>
-            </div>
-            
-            <div class="toolbar-actions">
-                <button id="bookmarkButton" class="action-button" title="Bookmark">
-                    <i class="far fa-bookmark"></i>
-                </button>
-                <button id="bookmarksListButton" class="action-button" title="Bookmarks">
-                    <i class="fas fa-bookmark"></i>
-                </button>
-                <button id="settingsButton" class="action-button" title="Settings">
-                    <i class="fas fa-cog"></i>
-                </button>
-                <button id="fullscreenButton" class="action-button" title="Fullscreen">
-                    <i class="fas fa-expand"></i>
-                </button>
-            </div>
-        </div>
-        
-        <!-- Page Info Bar -->
-        <div class="page-info-bar">
-            <div class="page-title">
-                <img id="pageFavicon" class="page-favicon" src="" alt="">
-                <span id="pageTitle"></span>
-            </div>
-            <div class="connection-info">
-                <span id="connectionStatus" class="connection-status">Disconnected</span>
-                <span id="fpsCounter" class="fps-counter">0 FPS</span>
-            </div>
-        </div>
-        
-        <!-- Browser Viewport -->
-        <div class="browser-viewport">
-            <img id="browserScreen" src="" alt="Browser Screen">
-            
-            <!-- Element Highlight Overlay -->
-            <div id="elementHighlight" class="element-highlight"></div>
-            
-            <!-- Loading Overlay -->
-            <div id="loadingOverlay" class="loading-overlay">
-                <div class="spinner"></div>
-                <div class="loading-text">Connecting...</div>
-            </div>
-            
-            <!-- Error Overlay -->
-            <div id="errorOverlay" class="error-overlay hidden">
-                <div class="error-message">
-                    <h3>Error</h3>
-                    <p id="errorMessage"></p>
-                    <button id="errorDismiss" class="button primary">Dismiss</button>
-                </div>
-            </div>
-            
-            <!-- Form Data Overlay -->
-            <div id="formDataPrompt" class="form-data-overlay hidden">
-                <div class="form-data-dialog">
-                    <h3>Form Data Detected</h3>
-                    <p>Would you like to save this information for future use?</p>
-                    <div id="formDataFields" class="form-data-fields"></div>
-                    <div class="form-data-actions">
-                        <button id="saveFormData" class="button primary">Save</button>
-                        <button id="cancelFormData" class="button secondary">Cancel</button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Page Loading Indicator -->
-            <div id="pageLoadingIndicator" class="page-loading-indicator hidden">
-                <div class="loading-bar"></div>
-            </div>
-        </div>
-        
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <div id="elementInfo" class="element-info">
-                <span id="elementType"></span>
-                <span id="elementText"></span>
-            </div>
-            <div class="browser-controls">
-                <div class="zoom-controls">
-                    <button id="zoomOutButton" class="zoom-button" title="Zoom Out">
-                        <i class="fas fa-search-minus"></i>
-                    </button>
-                    <span id="zoomLevel">100%</span>
-                    <button id="zoomInButton" class="zoom-button" title="Zoom In">
-                        <i class="fas fa-search-plus"></i>
-                    </button>
-                </div>
-                <div class="performance-controls">
-                    <label for="fpsSlider">FPS:</label>
-                    <input type="range" id="fpsSlider" min="1" max="30" value="10" class="fps-slider">
-                </div>
-            </div>
-        </div>
+    <div class="controls">
+        <input type="text" id="commandInput" placeholder="e.g., navigate https://google.com">
+        <button id="sendCommand">Send Command</button>
+        <span id="currentUrl">URL: N/A</span>
     </div>
-    
-    <!-- Bookmarks Panel -->
-    <div id="bookmarksPanel" class="panel hidden">
-        <div class="panel-header">
-            <h3>Bookmarks</h3>
-            <button id="closeBookmarksButton" class="close-button">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div class="panel-search">
-                <input type="text" id="bookmarkSearch" placeholder="Search bookmarks...">
-            </div>
-            <div id="bookmarksList" class="bookmarks-list">
-                <!-- Bookmarks will be populated here -->
-            </div>
-        </div>
+    <div class="controls command-help">
+        Commands: navigate [url] | type [selector] [text] | click [selector] | press_key [key (e.g. Enter)]
     </div>
-    
-    <!-- History Panel -->
-    <div id="historyPanel" class="panel hidden">
-        <div class="panel-header">
-            <h3>History</h3>
-            <button id="closeHistoryButton" class="close-button">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div class="panel-search">
-                <input type="text" id="historySearch" placeholder="Search history...">
-                <button id="clearHistoryButton" class="panel-action-button" title="Clear History">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-            <div id="historyList" class="history-list">
-                <!-- History will be populated here -->
-            </div>
-        </div>
+    <div class="controls"> <!-- New control bar for direct interaction -->
+        <input type="text" id="directTypeInput" placeholder="Type here after clicking an input on stream" style="flex-grow: 1; margin-right: 10px;">
+        <button id="sendDirectTypeButton">Send Type</button>
     </div>
-    
-    <!-- Settings Panel -->
-    <div id="settingsPanel" class="panel hidden">
-        <div class="panel-header">
-            <h3>Settings</h3>
-            <button id="closeSettingsButton" class="close-button">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="panel-content">
-            <div class="settings-section">
-                <h4>Performance</h4>
-                <div class="setting-item">
-                    <label for="qualitySelector">Screenshot Quality:</label>
-                    <select id="qualitySelector" class="settings-select">
-                        <option value="low">Low (Faster)</option>
-                        <option value="medium" selected>Medium</option>
-                        <option value="high">High (Slower)</option>
-                    </select>
-                </div>
-                <div class="setting-item">
-                    <label for="fpsLimitSelector">FPS Limit:</label>
-                    <select id="fpsLimitSelector" class="settings-select">
-                        <option value="5">5 FPS</option>
-                        <option value="10" selected>10 FPS</option>
-                        <option value="15">15 FPS</option>
-                        <option value="30">30 FPS</option>
-                    </select>
-                </div>
-            </div>
-            <div class="settings-section">
-                <h4>Interface</h4>
-                <div class="setting-item">
-                    <label for="themeSelector">Theme:</label>
-                    <select id="themeSelector" class="settings-select">
-                        <option value="light" selected>Light</option>
-                        <option value="dark">Dark</option>
-                        <option value="system">System</option>
-                    </select>
-                </div>
-                <div class="setting-item checkbox-item">
-                    <input type="checkbox" id="showElementHighlight" checked>
-                    <label for="showElementHighlight">Highlight elements on hover</label>
-                </div>
-                <div class="setting-item checkbox-item">
-                    <input type="checkbox" id="autoFillForms" checked>
-                    <label for="autoFillForms">Auto-fill forms when possible</label>
-                </div>
-            </div>
-            <div class="settings-section">
-                <h4>Privacy & Security</h4>
-                <div class="setting-item">
-                    <button id="clearCookiesButton" class="settings-button">Clear Cookies</button>
-                </div>
-                <div class="setting-item">
-                    <button id="clearFormDataButton" class="settings-button">Clear Saved Form Data</button>
-                </div>
-                <div class="setting-item">
-                    <button id="clearHistorySettingsButton" class="settings-button">Clear Browsing History</button>
-                </div>
-            </div>
-            <div class="settings-section">
-                <h4>Advanced</h4>
-                <div class="setting-item checkbox-item">
-                    <input type="checkbox" id="enableDebugMode">
-                    <label for="enableDebugMode">Enable debug mode</label>
-                </div>
-                <div class="setting-item">
-                    <button id="viewSourceButton" class="settings-button">View Page Source</button>
-                </div>
-                <div class="setting-item">
-                    <button id="showHistoryButton" class="settings-button">Show Navigation History</button>
-                </div>
-            </div>
-        </div>
+
+    <div class="browser-view-container">
+        <img id="browserView" src="{{ url_for('video_feed') }}" alt="Browser View - Loading video stream...">
     </div>
-    
-    <!-- Debug Panel -->
-    <div id="debugPanel" class="debug-panel hidden">
-        <div class="debug-header">
-            <h3>Debug</h3>
-            <button id="closeDebugButton" class="close-button">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="debug-content">
-            <div class="debug-section">
-                <h4>WebSocket Status</h4>
-                <pre id="wsStatus">Disconnected</pre>
-            </div>
-            <div class="debug-section">
-                <h4>Last Message</h4>
-                <pre id="lastMessage">None</pre>
-            </div>
-            <div class="debug-section">
-                <h4>Element Inspector</h4>
-                <pre id="elementDebugInfo">Click an element to inspect</pre>
-            </div>
-            <div class="debug-section">
-                <h4>Console</h4>
-                <div id="debugConsole" class="debug-console"></div>
-            </div>
-        </div>
+
+    <div class="status-log" id="statusLog">
+        <p>Welcome to the Manual Browser Control!</p>
     </div>
-    
-    <!-- Page Source View -->
-    <div id="sourcePanel" class="source-panel hidden">
-        <div class="panel-header">
-            <h3>Page Source</h3>
-            <button id="closeSourceButton" class="close-button">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="panel-content">
-            <pre id="pageSourceCode" class="page-source-code"></pre>
-        </div>
-    </div>
-    
-    <script src="/static/js/browser.js"></script>
+
+    <script>
+        const commandInput = document.getElementById('commandInput');
+        const sendButton = document.getElementById('sendCommand');
+        const browserView = document.getElementById('browserView'); // Get the img element
+        const statusLog = document.getElementById('statusLog');
+        const currentUrlDisplay = document.getElementById('currentUrl');
+        const directTypeInput = document.getElementById('directTypeInput');
+        const sendDirectTypeButton = document.getElementById('sendDirectTypeButton');
+
+        let urlUpdateInterval;
+        let viewportConfig = { width: 1280, height: 720, source: "initial_default" }; // Default, will be updated
+
+        function addLog(message, type = "") {
+            const p = document.createElement('p');
+            const timestamp = new Date().toLocaleTimeString();
+            p.textContent = `[${timestamp}] ${message}`;
+            if (type) p.classList.add(type);
+            statusLog.appendChild(p);
+            statusLog.scrollTop = statusLog.scrollHeight;
+        }
+
+        async function fetchViewportSize() {
+            try {
+                const response = await fetch('/viewport_size');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.width && data.height) {
+                    viewportConfig = data;
+                    addLog(`System: Browser viewport is ${viewportConfig.width}x${viewportConfig.height} (source: ${viewportConfig.source}).`, "system");
+                } else {
+                    addLog(`Warning: Could not get viewport size from server. Using default ${viewportConfig.width}x${viewportConfig.height}. ${data.error || ''}`, "error");
+                }
+            } catch (error) {
+                console.error('Error fetching viewport size:', error);
+                addLog('Error fetching viewport size: ' + error.message, "error");
+            }
+        }
+
+
+        function updateCurrentUrl() {
+            // ... (no change)
+             fetch('/current_url')
+                .then(response => {
+                     if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    currentUrlDisplay.textContent = "URL: " + (data.url || "N/A");
+                })
+                .catch(err => {
+                    console.error('Error fetching current URL:', err);
+                    // addLog('Error fetching current URL: ' + err.message, "error"); // Can be noisy
+                });
+        }
+
+        async function sendCommandToServer() {
+            // ... (no change)
+            const commandStr = commandInput.value;
+            if (!commandStr) return;
+
+            addLog(`USER CMD: ${commandStr}`, "user");
+            commandInput.disabled = true;
+            sendButton.disabled = true;
+            
+
+            try {
+                const response = await fetch('/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command_string: commandStr })
+                });
+                 if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({message: `HTTP ${response.status}`}));
+                    throw new Error(`Command request failed: ${response.status} - ${errorData.message || 'Unknown server error'}`);
+                }
+                const result = await response.json();
+                commandInput.value = ''; // Clear on successful submission, not necessarily on success of command itself
+
+                if (result.status === "success") {
+                    addLog(`SYSTEM: ${result.message || 'Command processed.'}`, "system");
+                } else {
+                    addLog(`ERROR: ${result.message || 'Unknown error processing command.'}`, "error");
+                }
+                if(result.logs && Array.isArray(result.logs)) {
+                    result.logs.forEach(log => addLog(`BROWSER: ${log}`, "browser"));
+                }
+            } catch (error) {
+                console.error('Error sending command:', error);
+                addLog('Error sending command: ' + error.message, "error");
+            } finally {
+                commandInput.disabled = false;
+                sendButton.disabled = false;
+                commandInput.focus();
+                setTimeout(updateCurrentUrl, 300); // Update URL a bit after command
+            }
+        }
+
+        async function handleBrowserViewClick(event) {
+            if (!viewportConfig || !viewportConfig.width || !viewportConfig.height) {
+                addLog("Viewport configuration not loaded or invalid. Cannot process click.", "error");
+                await fetchViewportSize(); // Attempt to re-fetch
+                if (!viewportConfig || !viewportConfig.width || !viewportConfig.height){
+                    addLog("Still no valid viewport. Click aborted.", "error");
+                    return;
+                }
+            }
+
+            const imgClientWidth = browserView.clientWidth;   // Displayed width of image
+            const imgClientHeight = browserView.clientHeight; // Displayed height of image
+
+            const clickXonImg = event.offsetX; // X coordinate within the image element
+            const clickYonImg = event.offsetY; // Y coordinate within the image element
+
+            if (imgClientWidth === 0 || imgClientHeight === 0) {
+                addLog("Browser view image has zero dimensions. Cannot calculate click.", "error");
+                return;
+            }
+
+            const targetX = (clickXonImg / imgClientWidth) * viewportConfig.width;
+            const targetY = (clickYonImg / imgClientHeight) * viewportConfig.height;
+
+            addLog(`USER INTERACT: Click on stream at img(${clickXonImg.toFixed(0)}, ${clickYonImg.toFixed(0)}) -> browser(${targetX.toFixed(0)}, ${targetY.toFixed(0)})`, "user");
+
+            try {
+                const response = await fetch('/interact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'click_at_coords', x: targetX, y: targetY })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({message: `HTTP ${response.status}`}));
+                    throw new Error(`Interaction (click) failed: ${response.status} - ${errorData.message || 'Unknown server error'}`);
+                }
+                const result = await response.json();
+                if (result.status === "success") {
+                    addLog(`SYSTEM: ${result.message || 'Click processed.'}`, "system");
+                    directTypeInput.focus(); // Focus the direct type input for convenience
+                } else {
+                    addLog(`ERROR: ${result.message || 'Unknown error processing click.'}`, "error");
+                }
+                if(result.logs && Array.isArray(result.logs)) {
+                    result.logs.forEach(log => addLog(`BROWSER: ${log}`, "browser"));
+                }
+            } catch (error) {
+                console.error('Error sending click interaction:', error);
+                addLog('Error sending click interaction: ' + error.message, "error");
+            }
+            setTimeout(updateCurrentUrl, 300);
+        }
+
+        async function sendDirectTypeToServer() {
+            const textToType = directTypeInput.value;
+            // Allow sending empty string (e.g. to trigger events or clear field if backend handles empty type meaningfully)
+            addLog(`USER INTERACT: Direct type: "${textToType}"`, "user");
+            directTypeInput.disabled = true;
+            sendDirectTypeButton.disabled = true;
+
+            try {
+                const response = await fetch('/interact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'type_direct', text: textToType })
+                });
+                 if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({message: `HTTP ${response.status}`}));
+                    throw new Error(`Interaction (type) failed: ${response.status} - ${errorData.message || 'Unknown server error'}`);
+                }
+                const result = await response.json();
+                if (result.status === "success") {
+                    addLog(`SYSTEM: ${result.message || 'Text typed.'}`, "system");
+                    directTypeInput.value = ''; // Clear input on success
+                } else {
+                    addLog(`ERROR: ${result.message || 'Unknown error typing text.'}`, "error");
+                }
+                 if(result.logs && Array.isArray(result.logs)) {
+                    result.logs.forEach(log => addLog(`BROWSER: ${log}`, "browser"));
+                }
+            } catch (error) {
+                console.error('Error sending type interaction:', error);
+                addLog('Error sending type interaction: ' + error.message, "error");
+            } finally {
+                directTypeInput.disabled = false;
+                sendDirectTypeButton.disabled = false;
+                directTypeInput.focus();
+                setTimeout(updateCurrentUrl, 300);
+            }
+        }
+
+        // Event Listeners
+        sendButton.addEventListener('click', sendCommandToServer);
+        commandInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') sendCommandToServer();
+        });
+
+        browserView.addEventListener('click', handleBrowserViewClick);
+        sendDirectTypeButton.addEventListener('click', sendDirectTypeToServer);
+        directTypeInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') sendDirectTypeToServer();
+        });
+
+        // Initial setup
+        addLog("Initializing view and fetching browser viewport configuration...");
+        fetchViewportSize(); // Fetch viewport size from server on load
+        updateCurrentUrl(); // Initial URL
+        urlUpdateInterval = setInterval(updateCurrentUrl, 5000); // Poll URL periodically
+
+        window.addEventListener('beforeunload', () => {
+            if (urlUpdateInterval) clearInterval(urlUpdateInterval);
+        });
+        addLog("Interface ready. MJPEG stream should be active. Click on stream to interact.");
+    </script>
 </body>
 </html>

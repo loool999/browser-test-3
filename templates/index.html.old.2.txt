@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Browser Control (MJPEG Stream)</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; background-color: #f0f0f0; }
+        .controls { padding: 10px; background-color: #333; color: white; display: flex; align-items: center; }
+        .controls input[type="text"] { flex-grow: 1; padding: 8px; margin-right: 10px; border-radius: 4px; border: 1px solid #555; background-color: #444; color: white;}
+        .controls button { padding: 8px 15px; border-radius: 4px; border: none; background-color: #007bff; color: white; cursor: pointer; }
+        .controls button:hover { background-color: #0056b3; }
+        .browser-view-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 10px; overflow: auto; background-color: #ddd;}
+        #browserView { max-width: 100%; max-height: 100%; border: 1px solid #ccc; object-fit: contain; background-color: white;}
+        .status-log { padding: 10px; background-color: #222; color: #ccc; font-size: 0.9em; height: 150px; overflow-y: auto; border-top: 1px solid #444;}
+        .status-log p { margin: 2px 0; }
+        .status-log .user { color: #87ceeb; }
+        .status-log .system { color: #90ee90; }
+        .status-log .browser { color: #f0e68c; }
+        .status-log .error { color: #ff6347; font-weight: bold; }
+        #currentUrl { font-size: 0.8em; margin-left: 20px; color: #aaa; }
+        .command-help { font-size: 0.8em; margin-left: 10px; color: #bbb; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="text" id="commandInput" placeholder="e.g., navigate https://google.com">
+        <button id="sendCommand">Send</button>
+        <span id="currentUrl">URL: N/A</span>
+    </div>
+    <div class="controls command-help">
+        Commands: navigate [url] | type [selector] [text] | click [selector] | press_key [key (e.g. Enter)]
+    </div>
+
+    <div class="browser-view-container">
+        <img id="browserView" src="{{ url_for('video_feed') }}" alt="Browser View - Loading video stream...">
+    </div>
+
+    <div class="status-log" id="statusLog">
+        <p>Welcome to the Manual Browser Control!</p>
+    </div>
+
+    <script>
+        const commandInput = document.getElementById('commandInput');
+        const sendButton = document.getElementById('sendCommand');
+        // browserView is now handled by the src attribute for MJPEG
+        const statusLog = document.getElementById('statusLog');
+        const currentUrlDisplay = document.getElementById('currentUrl');
+        let urlUpdateInterval;
+
+        function addLog(message, type = "") {
+            const p = document.createElement('p');
+            const timestamp = new Date().toLocaleTimeString();
+            p.textContent = `[${timestamp}] ${message}`;
+            if (type) p.classList.add(type);
+            statusLog.appendChild(p);
+            statusLog.scrollTop = statusLog.scrollHeight; // Fixed typo here
+        }
+
+        function updateCurrentUrl() {
+            fetch('/current_url') // This endpoint might still be polled
+                .then(response => {
+                     if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    currentUrlDisplay.textContent = "URL: " + (data.url || "N/A");
+                })
+                .catch(err => {
+                    console.error('Error fetching current URL:', err);
+                    addLog('Error fetching current URL: ' + err.message, "error");
+                });
+        }
+
+        async function sendCommandToServer() {
+            const commandStr = commandInput.value;
+            if (!commandStr) return;
+
+            addLog(`USER: ${commandStr}`, "user");
+            commandInput.disabled = true;
+            sendButton.disabled = true;
+            commandInput.value = '';
+
+            try {
+                const response = await fetch('/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command_string: commandStr })
+                });
+                 if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Command request failed: ${response.status} ${response.statusText} - ${errorText}`);
+                }
+                const result = await response.json();
+
+                if (result.status === "success") {
+                    addLog(`SYSTEM: ${result.message || 'Command processed.'}`, "system");
+                } else {
+                    addLog(`ERROR: ${result.message || 'Unknown error processing command.'}`, "error");
+                }
+                if(result.logs && result.logs.length > 0) {
+                    result.logs.forEach(log => addLog(`BROWSER: ${log}`, "browser"));
+                }
+            } catch (error) {
+                console.error('Error sending command:', error);
+                addLog('Error sending command: ' + error.message, "error");
+            } finally {
+                commandInput.disabled = false;
+                sendButton.disabled = false;
+                commandInput.focus();
+                // No explicit screenshot update needed here, MJPEG handles it.
+                // URL update might still be useful after a command.
+                setTimeout(updateCurrentUrl, 200);
+            }
+        }
+
+        sendButton.addEventListener('click', sendCommandToServer);
+        commandInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendCommandToServer();
+            }
+        });
+
+        addLog("Initializing view (MJPEG Stream)...");
+        updateCurrentUrl(); // Initial URL
+        urlUpdateInterval = setInterval(updateCurrentUrl, 70); // Poll URL every 2 seconds
+
+        window.addEventListener('beforeunload', () => {
+            if (urlUpdateInterval) clearInterval(urlUpdateInterval);
+        });
+        addLog("View initialized. MJPEG stream should be active.");
+    </script>
+</body>
+</html>
